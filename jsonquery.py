@@ -14,51 +14,62 @@ Lincesed under: Apache 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
 """
 
 parser = argparse.ArgumentParser(description='Query a JSON stream')
-parser.add_argument('-q', '--query', type=str, help='Query string', const='*', nargs='?')
+parser.add_argument('-q', '--query', type=str, help='Query string', const='$..', nargs='?')
+parser.add_argument('-f', '--file', type=str, help='Input file')
 args = parser.parse_args()
 
-buffered = ""
-while True:
-  read = sys.stdin.readline()
-  if read:
-    buffered += read
-  else:
-    break
 
-object = json.loads(buffered)
 
 def show_error_and_exit(error):
-  print "ERROR : " + error
+  print "jsonquery: " + error
   exit(1)
 
 def jiterate(query, object):
   subobject = object
+  cquery = copy.copy(query)
 	 
-  while len(query) > 0:
-    element = query.pop()
+  while len(cquery) > 0:
+    element = cquery.pop()
 
     # Wildcard
     if element == "":
       result = []
-      for key in subobject.keys():
-        r = jiterate(query, subobject[key])
-        if r != None:
-          result.append(r)
-      if len(result) == 1:
-        return result[0]
-      elif len(result) == 0:
-        return
+      r = jiterate(cquery, subobject)
+      if r != None:
+        return r
       else:
-        return result
+        recursivequery = cquery
+        recursivequery.insert(0, element)
+        for key in subobject.keys():
+          r = jiterate(recursivequery, subobject[key])
+          if r != None:
+            result.append(r)
+        if len(result) == 1:
+          return result[0]
+        elif len(result) == 0:
+          return
+        else:
+          return result
 
     # Get element
     else:
       element_name = element
       index = -1
+      # If index is set, retrieve it
       if element.endswith(']'):
         element_name = element[:element.find('[')]
         index = int(element[element.find('[')+1:element.find(']')])
-      if element_name in subobject:
+
+      # If wildcard catch all elements
+      if element == "*":
+        result = []
+        for key in subobject.keys():
+          subelement = subobject[key]
+          result.append(subelement)
+        return result
+
+      # Else extract key
+      elif element_name in subobject:
         subobject = subobject[element_name]
         if index > -1:
           if type(subobject) == type(list()) and len(subobject) >= index:
@@ -101,6 +112,31 @@ def pretty_print(object, indent_str):
     
   return str_output
 
+# Read in data
+buffered = ""
+# If file not set, use std.in
+if args.file == None:
+  while True:
+    read = sys.stdin.readline()
+    if read:
+      buffered += read
+    else:
+      break
+# Else read the file
+else:
+  try:
+    with open(args.file, 'r') as f:
+      buffered = f.read()
+  except IOError as e:
+    show_error_and_exit("Error opening file: \"" + e.__str__() + "\"")
+
+# Parse input to json
+try:
+  object = json.loads(buffered)
+except ValueError as e:
+  show_error_and_exit("JSON input parsing error: \"" + e.__str__() + "\"")
+
+# Parse query
 if args.query != None and len(args.query) > 0:
   elements = args.query.split('.')
   elements.reverse()
@@ -109,4 +145,5 @@ if args.query != None and len(args.query) > 0:
   output = jiterate(elements, object)
 else:
   output = object
+
 print pretty_print(output, "")
